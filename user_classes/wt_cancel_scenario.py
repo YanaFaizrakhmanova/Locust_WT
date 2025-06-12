@@ -2,7 +2,7 @@ from locust import task, SequentialTaskSet, FastHttpUser, constant_pacing, event
 from config.config import cfg, logger
 import sys, re
 from utils.assertion import check_http_response
-from utils.non_test_methods import open_csv_field
+from utils.non_test_methods import open_csv_field, processCancelRequestBody
 import random
 from urllib.parse import unquote_plus
 
@@ -101,7 +101,7 @@ class PurchaseFlightTicket2(SequentialTaskSet): # класс с задачами
         uc02_02_getLogin(self)
 
     @task
-    def uc02_03_openItinerary(self):
+    def us02_03_openItinerary(self):
         with self.client.get(
             '/cgi-bin/welcome.pl?page=itinerary',
             name='REQ02_03_1_/cgi-bin/welcome.pl?page=itinerary',
@@ -110,9 +110,9 @@ class PurchaseFlightTicket2(SequentialTaskSet): # класс с задачами
                 'accept-encoding': 'gzip, deflate, br, zstd'
             },
             allow_redirects=False,
-            debug_stream=sys.stderr
-        ) as req02_03_2_response:
-            check_http_response(req02_03_2_response, "User wants the intineraries")
+            #debug_stream=sys.stderr
+        ) as req02_03_1_response:
+            check_http_response(req02_03_1_response, "User wants the intineraries")
 
         with self.client.get(
             '/cgi-bin/nav.pl?page=menu&in=itinerary',
@@ -122,11 +122,12 @@ class PurchaseFlightTicket2(SequentialTaskSet): # класс с задачами
                 'accept-encoding': 'gzip, deflate, br, zstd'
             },
             allow_redirects=False,
-            debug_stream=sys.stderr
+           #debug_stream=sys.stderr
         ) as req02_03_2_response:
             check_http_response(req02_03_2_response, "Web Tours Navigation Bar")
 
         with self.client.get(
+
                 '/cgi-bin/itinerary.pl',
                 name='REQ02_03_3_/cgi-bin/itinerary.pl',
                 headers={
@@ -134,13 +135,42 @@ class PurchaseFlightTicket2(SequentialTaskSet): # класс с задачами
                     'accept-encoding': 'gzip, deflate, br, zstd'
                 },
                 allow_redirects=False,
-                debug_stream=sys.stderr
+                catch_response=True,
+                # debug_stream=sys.stderr
         ) as req02_03_3_response:
             check_http_response(req02_03_3_response, "Flights List")
+        self.flightID = re.findall(r'name=\"flightID\" value=\"(.*)\"  /', req02_03_3_response.text)
+        self.cgifields = re.findall(r'name=\".cgifields\" value=\"([0-9]{1,4})\"  />', req02_03_3_response.text)
+
+
+        logger.info(f'WebToursBaseClass started. Host:{self.flightID}')
+        logger.info(f'WebToursBaseClass started. Host:{self.cgifields}')
+
+
+    @task
+    def uc02_04_deleteTicket(self) -> None:
+
+        req_body02_04_1 = processCancelRequestBody(self.flightID, self.cgifields)
+        logger.info(f'Body_Cancel Host:{req_body02_04_1}')
+        with self.client.post(
+                '/cgi-bin/itinerary.pl',
+                name='REQ02_04_1_/cgi-bin/itinerary.pl',
+                headers={
+                    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application',
+                    'accept-encoding': 'gzip, deflate, br, zstd',
+                    'content-type': 'application/x-www-form-urlencoded'
+                },
+                data=req_body02_04_1,
+                catch_response=True,
+                #debug_stream=sys.stderr
+        ) as req02_04_1_response:
+            check_http_response(req02_04_1_response, "Flights List")
+            #check_http_response(req02_04_1_response, f"A total of {len(self.flightID)-1} scheduled flights." or "No flights have been reserved")
+
 
 
 class WebToursCancelUserClass(FastHttpUser): # юзер-класс, принимающий в себя основные параметры теста
-    wait_time = constant_pacing(cfg.pacing)
+    wait_time = constant_pacing(cfg.webtours_cancel.pacing)
     host = cfg.url
 
     logger.info(f'WebToursBaseClass started. Host:{host}')
